@@ -8,7 +8,7 @@ extern crate serde_json;
 extern crate tokio;
 extern crate tokio_io;
 
-use std::sync::Arc;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use bytes::{BufMut, BytesMut};
@@ -64,8 +64,8 @@ pub struct Ping {
 //     Done
 // }
 
-fn random_neighbor<R: Rng>(rng: &mut R, neighbors: &[u16]) -> ::std::net::SocketAddr {
-    ([0, 0, 0, 0, 0, 0, 0, 1], *seq::sample_iter(rng, neighbors, 1).unwrap()[0]).into()
+fn random_neighbor<R: Rng>(rng: &mut R, neighbors: &[SocketAddr]) -> SocketAddr {
+    *seq::sample_iter(rng, neighbors, 1).unwrap()[0]
 }
 
 fn main() {
@@ -83,8 +83,9 @@ fn main() {
     let neighbors = matches.values_of("neighbors").expect("neighbors")
         .map(|x| x.parse::<u16>().expect("u16 neighbor port"))
         .collect::<Vec<_>>();
-    let first_neighbor = random_neighbor(&mut rng, &neighbors);
     println!("Connecting to neighbors at ports: {:?}", &neighbors);
+    let neighbors: Vec<SocketAddr> = neighbors.into_iter().map(|port| ([0, 0, 0, 0, 0, 0, 0, 1], port).into()).collect();
+    let first_neighbor = random_neighbor(&mut rng, &neighbors);
     let addr = ([0, 0, 0, 0, 0, 0, 0, 1], port).into();
 
     let (udp_tx, udp_rx) = UdpFramed::new(

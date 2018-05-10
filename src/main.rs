@@ -9,14 +9,18 @@ extern crate tokio;
 extern crate tokio_io;
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use bytes::{BufMut, BytesMut};
 use clap::{Arg, App};
-use rand::random;
+use rand::{Rng, thread_rng, seq};
 use serde_json::{de, ser};
 use tokio::io;
 use tokio::net::{UdpSocket, UdpFramed};
 use tokio::prelude::*;
+use tokio::timer::Delay;
 use tokio_io::codec::{Encoder, Decoder};
+
 
 pub struct Codec;
 
@@ -60,20 +64,26 @@ pub struct Ping {
 //     Done
 // }
 
+fn random_neighbor<R: Rng>(rng: &mut R, neighbors: &[u16]) -> ::std::net::SocketAddr {
+    ([0, 0, 0, 0, 0, 0, 0, 1], *seq::sample_iter(rng, neighbors, 1).unwrap()[0]).into()
+}
+
 fn main() {
     let matches = App::new("test")
         .arg(Arg::with_name("port")
              .short("p")
              .long("port")
+             .required(true)
              .takes_value(true))
         .arg(Arg::with_name("neighbors")
              .multiple(true))
         .get_matches();
     let port = matches.value_of("port").expect("port").parse::<u16>().expect("u16 port");
-
+    let mut rng = thread_rng();
     let neighbors = matches.values_of("neighbors").expect("neighbors")
         .map(|x| x.parse::<u16>().expect("u16 neighbor port"))
         .collect::<Vec<_>>();
+    let first_neighbor = random_neighbor(&mut rng, &neighbors);
     println!("Connecting to neighbors at ports: {:?}", &neighbors);
     let addr = ([0, 0, 0, 0, 0, 0, 0, 1], port).into();
 
@@ -82,29 +92,33 @@ fn main() {
         Codec::new(),
     ).split();
 
-    //let neighbor = neighbors[random::<usize>() % neighbors.len()];
-    let server = udp_rx
-        //.send((Ping { source: port, hops: 0 }, &neighbor))
-        //.and_then(|_| udp_rx)
-        .map_err(|err| {
-            println!("accept error = {:?}", err);
-        })
-        .for_each(move |(ping, addr)| {
-            let addr = &addr.clone();
-            let udpsock = UdpSocket::bind(&addr).expect("bind inner socket");
-            if ping.source == port {
-                println!("Received ping from {} after {} hops", addr, ping.hops);
+
+    let bouncer = move |udp_tx| { 
+        udp_rx
+            .map(move |(ping, _addr)| {
+                let mut rng = thread_rng();
+                let neighbor = random_neighbor(&mut rng, &neighbors);
+                (Ping { source: ping.source, hops: ping.hops + 1 }, neighbor)
+            })
+            .filter(move |&(ref ping, ref addr)| if ping.source == port {
+                println!("Server {} Received ping from {} after {} hops", port, addr, ping.hops);
+                false
             } else {
-                let dest = random::<usize>() % &neighbors.len();
-                let neighbor = ([0, 0, 0, 0, 0, 0, 0, 1], *&neighbors[dest]).into();
-                let dgram = udpsock
-                    .send_dgram(ser::to_string(&Ping { source: ping.source, hops: ping.hops + 1 }).expect("serialize ping"), &neighbor)
-                    .map(|_|())
-                    .map_err(|err| println!("an error occurred: {:?}", err));
-                tokio::spawn(dgram);
-            };
-            Ok(())
-        });
-    println!("Server running on {:?}", addr);
+                true
+            })
+            .forward(udp_tx)
+            .and_then(|_| Ok(()))
+    };
+
+    let server = Delay::new(Instant::now() + Duration::from_millis(1000))
+        .then(move |_| udp_tx.send((
+            Ping { source: port, hops: 0 },
+            first_neighbor
+        )))
+        .and_then(
+            move |udp_tx| bouncer(udp_tx))
+        .map_err(|err| println!("Err: {:?}", err));
+
+    println!("Server running on {}", addr);
     tokio::run(server);
 }

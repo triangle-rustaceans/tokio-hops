@@ -115,7 +115,7 @@ fn make_hop_server_task(port: u16, neighbor_ports: &[u16]) -> impl Future<Item=(
     server_task
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Box<std::error::Error>> {
     let matches = App::new("test")
         .arg(Arg::with_name("port")
              .short("p")

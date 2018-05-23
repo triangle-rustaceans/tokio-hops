@@ -15,10 +15,13 @@ use bytes::{BufMut, BytesMut};
 use clap::{Arg, App};
 use rand::{Rng, thread_rng, seq};
 use serde_json::{de, ser};
-use tokio::io;
-use tokio::net::{UdpSocket, UdpFramed};
-use tokio::prelude::*;
-use tokio::timer::Delay;
+// NEW!  Nested imports;
+use tokio::{
+    io,
+    net::{UdpSocket, UdpFramed},
+    prelude::*,
+    timer::Delay,
+};
 use tokio_io::codec::{Encoder, Decoder};
 
 
@@ -68,6 +71,7 @@ fn random_neighbor<R: Rng>(rng: &mut R, neighbors: &[SocketAddr]) -> SocketAddr 
     *seq::sample_iter(rng, neighbors, 1).unwrap()[0]
 }
 
+// NEW! impl Trait for unnameable types
 fn make_hop_server_task(port: u16, neighbor_ports: &[u16]) -> impl Future<Item=(), Error=()> {
     let mut rng = thread_rng();
     let neighbors: Vec<SocketAddr> = neighbor_ports.into_iter()
@@ -107,14 +111,13 @@ fn make_hop_server_task(port: u16, neighbor_ports: &[u16]) -> impl Future<Item=(
     };
 
     let server_task = Delay::new(Instant::now() + Duration::from_secs(1))
-        .then(
-            move |_| udp_tx.send((Msg::Ping(Ping { source: port, hops: 0 }), first_neighbor))
-        )
+        .then(move |_| udp_tx.send((Msg::Ping(Ping { source: port, hops: 0 }), first_neighbor)))
         .and_then(move |udp_tx| bouncer(udp_tx))
         .map_err(|err| println!("Err: {:?}", err));
     server_task
 }
 
+// NEW!  Return Result from main
 fn main() -> Result<(), Box<std::error::Error>> {
     let matches = App::new("test")
         .arg(Arg::with_name("port")
